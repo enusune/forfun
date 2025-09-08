@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>艺术效果生成器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            touch-action: manipulation;
+        }
+        .loader {
+            border: 8px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 8px solid #3498db;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .control-btn {
+            background-color: #3b82f6;
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: inline-block;
+            text-align: center;
+            font-size: 0.9rem;
+            border: none;
+        }
+        .control-btn:hover {
+            background-color: #2563eb;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        select {
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            border: 1px solid #d1d5db;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-6">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">艺术效果生成器</h1>
+            <p class="text-gray-600 mt-2">将您的照片变成骰子、Emoji或魔方艺术画</p>
+        </header>
+
+        <div class="bg-white p-4 sm:p-6 rounded-2xl shadow-lg">
+            <!-- Controls -->
+            <div class="controls-area mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                <div class="flex flex-col space-y-2">
+                    <label for="artMedium" class="font-medium text-gray-700 text-sm">选择艺术媒介:</label>
+                    <select id="artMedium">
+                        <option value="dice">骰子</option>
+                        <option value="emoji">表情符号 (Emoji)</option>
+                        <option value="rubiks">魔方</option>
+                    </select>
+                </div>
+                <div class="flex flex-col space-y-2">
+                     <label for="imageUploader" class="control-btn">上传新图片</label>
+                     <input type="file" id="imageUploader" accept="image/*">
+                </div>
+                <div class="flex flex-col space-y-2">
+                    <button id="regenerateBtn" class="control-btn bg-green-500 hover:bg-green-600">动画重现</button>
+                </div>
+                <div class="md:col-span-3">
+                    <label for="resolution" class="block mb-2 font-medium text-gray-700 text-sm">调整细节 (元素大小): <span id="resolutionValue" class="font-bold text-blue-600">20</span>px</label>
+                    <input type="range" id="resolution" min="10" max="50" value="20" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+
+            <!-- Canvas and Loader -->
+            <div id="canvasContainer" class="relative w-full bg-gray-200 rounded-lg overflow-hidden shadow-inner">
+                <div id="loader" class="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
+                    <div class="text-center">
+                        <div class="loader mx-auto"></div>
+                        <p id="loaderText" class="mt-4 text-gray-600">正在分析图片...</p>
+                    </div>
+                </div>
+                <canvas id="artCanvas" class="absolute top-0 left-0 w-full h-full"></canvas>
+            </div>
+        </div>
+
+        <footer class="text-center mt-8 text-gray-500 text-sm">
+            <p>&copy; 2024 艺术效果生成器</p>
+        </footer>
+    </div>
+
+    <script>
+    // --- DOM Element References ---
+    const canvas = document.getElementById('artCanvas');
+    const ctx = canvas.getContext('2d');
+    const resolutionSlider = document.getElementById('resolution');
+    const resolutionValueSpan = document.getElementById('resolutionValue');
+    const sourceImage = new Image();
+    sourceImage.crossOrigin = "Anonymous"; // Allow cross-origin images
+    const loader = document.getElementById('loader');
+    const loaderText = document.getElementById('loaderText');
+    const canvasContainer = document.getElementById('canvasContainer');
+    const imageUploader = document.getElementById('imageUploader');
+    const artMediumSelector = document.getElementById('artMedium');
+    const regenerateBtn = document.getElementById('regenerateBtn');
+
+    // --- State ---
+    let imageLoaded = false;
+    let isDrawing = false;
+    let drawTimeout;
+    let animationFrameId;
+    let cellDataCache = []; // Cache the analyzed image data
+
+    // --- Drawing Data & Functions ---
+
+    const dieDotPositions = { 1: [{x:.5,y:.5}], 2: [{x:.25,y:.25},{x:.75,y:.75}], 3: [{x:.25,y:.25},{x:.5,y:.5},{x:.75,y:.75}], 4: [{x:.25,y:.25},{x:.75,y:.25},{x:.25,y:.75},{x:.75,y:.75}], 5: [{x:.25,y:.25},{x:.75,y:.25},{x:.5,y:.5},{x:.25,y:.75},{x:.75,y:.75}], 6: [{x:.25,y:.25},{x:.75,y:.25},{x:.25,y:.5},{x:.75,y:.5},{x:.25,y:.75},{x:.75,y:.75}]};
+
+    const emojiPalette = [ { emoji: '⚫', color: [0, 0, 0] }, { emoji: '🔴', color: [255, 0, 0] }, { emoji: '🟠', color: [255, 165, 0] }, { emoji: '🟡', color: [255, 255, 0] }, { emoji: '🟢', color: [0, 128, 0] }, { emoji: '🔵', color: [0, 0, 255] }, { emoji: '🟣', color: [128, 0, 128] }, { emoji: '🟤', color: [165, 42, 42] }, { emoji: '⚪', color: [255, 255, 255] }, { emoji: '灰色', color: [128, 128, 128] }, { emoji: '❤️', color: [220, 20, 60] }, { emoji: '🧡', color: [255, 140, 0] }, { emoji: '💛', color: [255, 215, 0] }, { emoji: '💚', color: [50, 205, 50] }, { emoji: '💙', color: [30, 144, 255] }, { emoji: '💜', color: [148, 0, 211] }, { emoji: '🖤', color: [50, 50, 50] }, { emoji: '🤍', color: [245, 245, 245] }, { emoji: '🌳', color: [34, 139, 34] }, { emoji: '💧', color: [0, 191, 255] }, { emoji: '🔥', color: [255, 69, 0] }, { emoji: '☀️', color: [255, 250, 205] }, { emoji: '🌸', color: [255, 182, 193] }, { emoji: '🍂', color: [210, 105, 30] } ];
+
+    const rubiksPaletteHex = ['#FFFFFF', '#FFD500', '#0045AD', '#009B48', '#FF5900', '#B90000']; // White, Yellow, Blue, Green, Orange, Red
+    
+    function hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? [
+            parseInt(result[1], 16),
+            parseInt(result[2], 16),
+            parseInt(result[3], 16)
+        ] : null;
+    }
+    const rubiksPaletteRGB = rubiksPaletteHex.map(hexToRgb);
+
+
+    function drawDie(x, y, size, number) {
+        const cornerRadius = size * 0.15;
+        const dotRadius = size * 0.09;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#E0E0E0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + cornerRadius, y);
+        ctx.lineTo(x + size - cornerRadius, y);
+        ctx.quadraticCurveTo(x + size, y, x + size, y + cornerRadius);
+        ctx.lineTo(x + size, y + size - cornerRadius);
+        ctx.quadraticCurveTo(x + size, y + size, x + size - cornerRadius, y + size);
+        ctx.lineTo(x + cornerRadius, y + size);
+        ctx.quadraticCurveTo(x, y + size, x, y + size - cornerRadius);
+        ctx.lineTo(x, y + cornerRadius);
+        ctx.quadraticCurveTo(x, y, x + cornerRadius, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = (number === 1 || number === 4) ? '#EF4444' : '#1F2937';
+        const positions = dieDotPositions[number];
+        if (positions) {
+            positions.forEach(pos => {
+                ctx.beginPath();
+                ctx.arc(x + pos.x * size, y + pos.y * size, dotRadius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+    }
+
+    function drawEmoji(x, y, size, emoji) {
+        ctx.font = `${size * 0.9}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emoji, x + size / 2, y + size / 2);
+    }
+
+    function drawRubiksCube(x, y, size, avgColor) {
+        const stickerSize = size / 3;
+        const gap = size * 0.05;
+
+        ctx.fillStyle = 'black';
+        ctx.fillRect(x, y, size, size);
+        
+        // --- NEW ALGORITHM to determine 9 sticker colors ---
+        let stickerColors = [];
+        let runningTotal = [0, 0, 0];
+        const targetTotal = [avgColor[0] * 9, avgColor[1] * 9, avgColor[2] * 9];
+
+        for (let i = 0; i < 9; i++) {
+            let bestColor = null;
+            let minError = Infinity;
+
+            for (const paletteColor of rubiksPaletteRGB) {
+                const newTotal = [
+                    runningTotal[0] + paletteColor[0],
+                    runningTotal[1] + paletteColor[1],
+                    runningTotal[2] + paletteColor[2]
+                ];
+                
+                const futureTarget = [
+                    targetTotal[0] * (i + 1) / 9,
+                    targetTotal[1] * (i + 1) / 9,
+                    targetTotal[2] * (i + 1) / 9,
+                ];
+
+                const error = colorDistance(newTotal, futureTarget);
+
+                if (error < minError) {
+                    minError = error;
+                    bestColor = paletteColor;
+                }
+            }
+            
+            stickerColors.push(bestColor);
+            runningTotal[0] += bestColor[0];
+            runningTotal[1] += bestColor[1];
+            runningTotal[2] += bestColor[2];
+        }
+
+        // Shuffle the colors for a random arrangement on the face
+        stickerColors.sort(() => Math.random() - 0.5);
+
+        // Draw the 9 stickers
+        let colorIndex = 0;
+        for (let row = 0; row < 3; row++) {
+            for (let col = 0; col < 3; col++) {
+                const color = stickerColors[colorIndex++];
+                ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                ctx.fillRect(
+                    x + col * stickerSize + gap,
+                    y + row * stickerSize + gap,
+                    stickerSize - gap * 2,
+                    stickerSize - gap * 2
+                );
+            }
+        }
+    }
+
+    function colorDistance(c1, c2) {
+        return Math.sqrt(Math.pow(c1[0] - c2[0], 2) + Math.pow(c1[1] - c2[1], 2) + Math.pow(c1[2] - c2[2], 2));
+    }
+
+    function findClosestEmoji(color) {
+        let closest = { emoji: '?', dist: Infinity };
+        for (const item of emojiPalette) {
+            const dist = colorDistance(color, item.color);
+            if (dist < closest.dist) {
+                closest = { emoji: item.emoji, dist: dist };
+            }
+        }
+        return closest.emoji;
+    }
+    
+    // --- Core Logic ---
+
+    function analyzeImage() {
+        if (!imageLoaded) return;
+        isDrawing = true;
+        loader.style.display = 'flex';
+        loaderText.textContent = '正在分析图片...';
+
+        setTimeout(() => {
+            const resolution = parseInt(resolutionSlider.value, 10);
+            const canvasWidth = canvas.clientWidth;
+            const aspectRatio = sourceImage.naturalWidth / sourceImage.naturalHeight;
+            const canvasHeight = canvasWidth / aspectRatio;
+            canvas.width = canvasWidth;
+            canvas.height = canvasHeight;
+            canvasContainer.style.height = `${canvasHeight}px`;
+
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = canvasWidth;
+            tempCanvas.height = canvasHeight;
+            tempCtx.drawImage(sourceImage, 0, 0, canvasWidth, canvasHeight);
+
+            cellDataCache = [];
+            for (let y = 0; y < canvasHeight; y += resolution) {
+                for (let x = 0; x < canvasWidth; x += resolution) {
+                    const imageData = tempCtx.getImageData(x, y, resolution, resolution);
+                    const data = imageData.data;
+                    let r = 0, g = 0, b = 0, totalBrightness = 0, pixelCount = 0;
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        if (data[i + 3] === 0) continue;
+                        r += data[i];
+                        g += data[i + 1];
+                        b += data[i + 2];
+                        totalBrightness += 0.2126 * data[i] + 0.7152 * data[i+1] + 0.0722 * data[i+2];
+                        pixelCount++;
+                    }
+                    
+                    if (pixelCount > 0) {
+                        cellDataCache.push({
+                            x, y, resolution,
+                            avgBrightness: totalBrightness / pixelCount,
+                            avgColor: [r / pixelCount, g / pixelCount, b / pixelCount]
+                        });
+                    }
+                }
+            }
+            startAnimatedDrawing();
+        }, 50);
+    }
+
+    function startAnimatedDrawing() {
+        if (isDrawing && animationFrameId) {
+            cancelAnimationFrame(animationFrameId);
+        }
+        isDrawing = true;
+        loader.style.display = 'flex';
+        loaderText.textContent = '正在生成艺术画...';
+
+        const medium = artMediumSelector.value;
+        let drawQueue = cellDataCache.map(cell => {
+            let value;
+            if (medium === 'dice') {
+                const clamped = Math.min(cell.avgBrightness, 254.999);
+                value = 6 - Math.floor(clamped / (255 / 6));
+            } else if (medium === 'emoji') {
+                value = findClosestEmoji(cell.avgColor);
+            } else { // rubiks
+                value = cell.avgColor; // Pass the original average color
+            }
+            return { x: cell.x, y: cell.y, size: cell.resolution, value: value };
+        });
+
+        // Shuffle for a more interesting drawing animation
+        drawQueue.sort(() => Math.random() - 0.5);
+
+        ctx.fillStyle = '#F3F4F6';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        let i = 0;
+        const itemsPerFrame = Math.max(1, Math.floor(drawQueue.length / 150)); // Draw faster for more items
+
+        function animate() {
+            if (i >= drawQueue.length) {
+                isDrawing = false;
+                loader.style.display = 'none';
+                return;
+            }
+            
+            for (let j = 0; j < itemsPerFrame && i < drawQueue.length; j++) {
+                const item = drawQueue[i];
+                if (medium === 'dice') {
+                    drawDie(item.x, item.y, item.size, item.value);
+                } else if (medium === 'emoji') {
+                    drawEmoji(item.x, item.y, item.size, item.value);
+                } else if (medium === 'rubiks') {
+                    drawRubiksCube(item.x, item.y, item.size, item.value);
+                }
+                i++;
+            }
+            
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        animate();
+    }
+
+    // --- Event Handlers ---
+    function handleControlsChange() {
+        clearTimeout(drawTimeout);
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        drawTimeout = setTimeout(analyzeImage, 250);
+    }
+
+    function handleImageUpload(event) {
+        const file = event.target.files[0];
+        if (file) {
+            if (sourceImage.src.startsWith('blob:')) {
+                URL.revokeObjectURL(sourceImage.src);
+            }
+            sourceImage.src = URL.createObjectURL(file);
+            loader.style.display = 'flex';
+        }
+    }
+
+    // --- Event Listeners ---
+    resolutionSlider.addEventListener('input', () => {
+        resolutionValueSpan.textContent = resolutionSlider.value;
+    });
+    resolutionSlider.addEventListener('change', handleControlsChange);
+    artMediumSelector.addEventListener('change', startAnimatedDrawing); // No need to re-analyze, just redraw
+    imageUploader.addEventListener('change', handleImageUpload);
+    regenerateBtn.addEventListener('click', startAnimatedDrawing);
+
+    sourceImage.onload = () => {
+        console.log("Source image loaded.");
+        imageLoaded = true;
+        analyzeImage();
+    };
+    sourceImage.onerror = () => {
+        console.error("Failed to load source image.");
+        loader.innerHTML = '<p class="text-red-500">图片加载失败，请重试。</p>';
+    }
+
+    // Initial load
+    sourceImage.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/800px-Cat_November_2010-1a.jpg";
+    window.addEventListener('resize', () => {
+        clearTimeout(drawTimeout);
+        drawTimeout = setTimeout(analyzeImage, 500);
+    });
+    </script>
+</body>
+</html>
+
