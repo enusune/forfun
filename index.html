@@ -48,7 +48,7 @@
             border-radius: 0.5rem;
             border: 1px solid #d1d5db;
         }
-        /* Style for the canvas container when in fullscreen */
+        /* Style for the canvas container when in native fullscreen */
         #canvasContainer:fullscreen {
             background-color: #111827; /* A dark background for immersive viewing */
             padding: 0;
@@ -60,6 +60,30 @@
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
+        }
+        /* Styles for custom fallback fullscreen */
+        body.fullscreen-active {
+            overflow: hidden;
+        }
+        .custom-fullscreen {
+            position: fixed !important;
+            top: 0;
+            left: 0;
+            width: 100vw !important;
+            height: 100vh !important;
+            max-width: none !important;
+            z-index: 9999;
+            background-color: #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0 !important;
+            padding: 0 !important;
+        }
+        .custom-fullscreen #artCanvas {
+             max-width: 100%;
+             max-height: 100%;
+             object-fit: contain;
         }
     </style>
 </head>
@@ -277,7 +301,10 @@
             const canvasHeight = canvasWidth / aspectRatio;
             canvas.width = canvasWidth;
             canvas.height = canvasHeight;
-            canvasContainer.style.height = `${canvasHeight}px`;
+            
+            if(!document.fullscreenElement && !canvasContainer.classList.contains('custom-fullscreen')) {
+                canvasContainer.style.height = `${canvasHeight}px`;
+            }
 
             const tempCanvas = document.createElement('canvas');
             const tempCtx = tempCanvas.getContext('2d');
@@ -387,12 +414,38 @@
     }
 
     function toggleFullscreen() {
-        if (!document.fullscreenElement) {
-            canvasContainer.requestFullscreen().catch(err => {
-                alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+        const isNativeFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        const isCustomFullscreen = canvasContainer.classList.contains('custom-fullscreen');
+
+        if (isNativeFullscreen) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+            else if (document.msExitFullscreen) document.msExitFullscreen();
+            return;
+        }
+        
+        if (isCustomFullscreen) {
+            canvasContainer.classList.remove('custom-fullscreen');
+            document.body.classList.remove('fullscreen-active');
+            window.dispatchEvent(new Event('resize'));
+            return;
+        }
+
+        const requestFullscreen = canvasContainer.requestFullscreen || canvasContainer.webkitRequestFullscreen || canvasContainer.mozRequestFullScreen || canvasContainer.msRequestFullscreen;
+
+        if (requestFullscreen) {
+            requestFullscreen.call(canvasContainer).catch(() => {
+                console.warn("原生全屏模式失败，切换到自定义模式。");
+                canvasContainer.classList.add('custom-fullscreen');
+                document.body.classList.add('fullscreen-active');
+                setTimeout(analyzeImage, 50);
             });
         } else {
-            document.exitFullscreen();
+            console.log("不支持原生全屏API，使用自定义模式。");
+            canvasContainer.classList.add('custom-fullscreen');
+            document.body.classList.add('fullscreen-active');
+            setTimeout(analyzeImage, 50);
         }
     }
 
@@ -417,13 +470,21 @@
 
     // Initial load
     sourceImage.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/800px-Cat_November_2010-1a.jpg";
+    
     window.addEventListener('resize', () => {
-        // Redraw when exiting fullscreen or resizing window
-        if (!document.fullscreenElement) {
+        const isNativeFullscreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+        if (!isNativeFullscreen) {
              clearTimeout(drawTimeout);
              drawTimeout = setTimeout(analyzeImage, 300);
         }
     });
+    
+    document.addEventListener('fullscreenchange', () => {
+        if (!document.fullscreenElement) {
+            setTimeout(analyzeImage, 300);
+        }
+    });
+
     </script>
 </body>
 </html>
