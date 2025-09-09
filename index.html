@@ -48,6 +48,19 @@
             border-radius: 0.5rem;
             border: 1px solid #d1d5db;
         }
+        /* Style for the canvas container when in fullscreen */
+        #canvasContainer:fullscreen {
+            background-color: #111827; /* A dark background for immersive viewing */
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #canvasContainer:fullscreen #artCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-800">
@@ -83,7 +96,7 @@
             </div>
 
             <!-- Canvas and Loader -->
-            <div id="canvasContainer" class="relative w-full bg-gray-200 rounded-lg overflow-hidden shadow-inner">
+            <div id="canvasContainer" class="relative w-full bg-gray-200 rounded-lg overflow-hidden shadow-inner cursor-pointer" title="点击可全屏查看">
                 <div id="loader" class="absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-10">
                     <div class="text-center">
                         <div class="loader mx-auto"></div>
@@ -184,7 +197,6 @@
         ctx.fillStyle = 'black';
         ctx.fillRect(x, y, size, size);
         
-        // --- NEW ALGORITHM to determine 9 sticker colors ---
         let stickerColors = [];
         let runningTotal = [0, 0, 0];
         const targetTotal = [avgColor[0] * 9, avgColor[1] * 9, avgColor[2] * 9];
@@ -220,10 +232,8 @@
             runningTotal[2] += bestColor[2];
         }
 
-        // Shuffle the colors for a random arrangement on the face
         stickerColors.sort(() => Math.random() - 0.5);
 
-        // Draw the 9 stickers
         let colorIndex = 0;
         for (let row = 0; row < 3; row++) {
             for (let col = 0; col < 3; col++) {
@@ -254,8 +264,6 @@
         return closest.emoji;
     }
     
-    // --- Core Logic ---
-
     function analyzeImage() {
         if (!imageLoaded) return;
         isDrawing = true;
@@ -328,14 +336,13 @@
             return { x: cell.x, y: cell.y, size: cell.resolution, value: value };
         });
 
-        // Shuffle for a more interesting drawing animation
         drawQueue.sort(() => Math.random() - 0.5);
 
         ctx.fillStyle = '#F3F4F6';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
         let i = 0;
-        const itemsPerFrame = Math.max(1, Math.floor(drawQueue.length / 150)); // Draw faster for more items
+        const itemsPerFrame = Math.max(1, Math.floor(drawQueue.length / 150));
 
         function animate() {
             if (i >= drawQueue.length) {
@@ -358,7 +365,6 @@
             
             animationFrameId = requestAnimationFrame(animate);
         }
-
         animate();
     }
 
@@ -380,17 +386,27 @@
         }
     }
 
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            canvasContainer.requestFullscreen().catch(err => {
+                alert(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+            });
+        } else {
+            document.exitFullscreen();
+        }
+    }
+
     // --- Event Listeners ---
     resolutionSlider.addEventListener('input', () => {
         resolutionValueSpan.textContent = resolutionSlider.value;
     });
     resolutionSlider.addEventListener('change', handleControlsChange);
-    artMediumSelector.addEventListener('change', startAnimatedDrawing); // No need to re-analyze, just redraw
+    artMediumSelector.addEventListener('change', startAnimatedDrawing);
     imageUploader.addEventListener('change', handleImageUpload);
     regenerateBtn.addEventListener('click', startAnimatedDrawing);
+    canvasContainer.addEventListener('click', toggleFullscreen); // New listener for fullscreen
 
     sourceImage.onload = () => {
-        console.log("Source image loaded.");
         imageLoaded = true;
         analyzeImage();
     };
@@ -402,8 +418,11 @@
     // Initial load
     sourceImage.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Cat_November_2010-1a.jpg/800px-Cat_November_2010-1a.jpg";
     window.addEventListener('resize', () => {
-        clearTimeout(drawTimeout);
-        drawTimeout = setTimeout(analyzeImage, 500);
+        // Redraw when exiting fullscreen or resizing window
+        if (!document.fullscreenElement) {
+             clearTimeout(drawTimeout);
+             drawTimeout = setTimeout(analyzeImage, 300);
+        }
     });
     </script>
 </body>
